@@ -40,7 +40,7 @@ nuget:
 
 install:
   # Install non-python dependencies using chocolatey package manager
-  - choco install -y swig
+  - choco install -r -y swig
   - ECHO "Filesystem root:"
   - ps: "ls \"C:/\""
 
