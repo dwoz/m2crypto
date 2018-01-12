@@ -40,13 +40,19 @@ else:
 
 
 def _get_additional_includes():
-    pid = subprocess.Popen(['cpp', '-Wp,-v', '-'],
-                           stdin=open(os.devnull, 'r'),
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
-    _, err = pid.communicate()
-    err = [line.lstrip() for line in err.decode('utf8').split('\n')
-           if line and line.startswith(' /')]
+    if os.name == 'nt':
+        globmask = os.path.join('C:', 'Program Files*',
+                                'Microsoft Visual Studio*', 'VC', 'include')
+        err = glob.glob(globmask)
+    else:
+        pid = subprocess.Popen(['cpp', '-Wp,-v', '-'],
+                               stdin=open(os.devnull, 'r'),
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+        _, err = pid.communicate()
+        err = [line.lstrip() for line in err.decode('utf8').split('\n')
+               if line and line.startswith(' /')]
+
     log.debug('additional includes:\n%s', err)
     return err
 
@@ -259,11 +265,10 @@ x_comp_args = set()
 
 # We take care of deprecated functions in OpenSSL with our code, no need
 # to spam compiler output with it.
-x_comp_args.add("-Wno-deprecated-declarations")
 if sys.platform == 'win32':
     x_comp_args.update(['-DTHREADING', '-D_CRT_SECURE_NO_WARNINGS'])
 else:
-    x_comp_args.add('-DTHREADING')
+    x_comp_args.update(['-DTHREADING', '-Wno-deprecated-declarations'])
 
 # Don't try to run swig on the ancient platforms
 if swig_version(REQUIRED_SWIG_VERSION):
