@@ -41,8 +41,8 @@ else:
 
 def _get_additional_includes():
     if os.name == 'nt':
-        globmask = os.path.join('C:', 'Program Files*',
-                                'Microsoft Visual Studio*', 'VC', 'include')
+        globmask = os.path.join('C:', os.sep, 'Program Files*',
+                                '*Visual*', 'VC', 'include')
         err = glob.glob(globmask)
     else:
         pid = subprocess.Popen(['cpp', '-Wp,-v', '-'],
