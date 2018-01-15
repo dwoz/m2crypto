@@ -98,6 +98,7 @@ BIO * bio_new_file(const char *filename, const char *mode) {
 
 BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
     FILE *fp = NULL;
+    BIO *bio = NULL;
 #if PY_MAJOR_VERSION >= 3
     if (PyObject_HasAttrString(pyfile, "fileno")) {
         int fd = (int)PyLong_AsLong(PyObject_CallMethod(pyfile, "fileno", NULL));
@@ -120,7 +121,7 @@ BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
 #else
     fp = PyFile_AsFile(pyfile);
 #endif
-    BIO *bio = BIO_new_fp(fp, bio_close); /* returns NULL if error occurred */
+    bio = BIO_new_fp(fp, bio_close); /* returns NULL if error occurred */
 
     if (bio == NULL) {
         char *name = "";
