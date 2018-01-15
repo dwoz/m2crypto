@@ -4289,7 +4289,7 @@ int X509_NAME_get0_der(X509_NAME *nm, const unsigned char **pder,
 
 #else /* PY2K */
 
-#define PyLong_FromLong(x) PyInt_FromLong(x)
+/* #define PyLong_FromLong(x) PyInt_FromLong(x) */
 #define PyUnicode_AsUTF8(x) PyString_AsString(x)
 
 #endif /* PY_MAJOR_VERSION */

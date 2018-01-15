@@ -263,7 +263,9 @@ int ssl_verify_callback(int ok, X509_STORE_CTX *ctx) {
     }
 
     if (new_style_callback) {
-        PyObject *x509mod = PyDict_GetItemString(PyImport_GetModuleDict(), "M2Crypto.X509");
+        PyObject *x509mod;
+        
+        x509mod = PyDict_GetItemString(PyImport_GetModuleDict(), "M2Crypto.X509");
         _klass = PyObject_GetAttrString(x509mod, "X509_Store_Context");
 
         _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
