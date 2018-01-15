@@ -8,13 +8,6 @@
  * interface file instead. 
  * ----------------------------------------------------------------------------- */
 
-#ifdef _MSC_VER
-#include <Winsock2.h>
-#pragma comment(lib, "Ws2_32")
-typedef unsigned __int64 uint64_t;
-#endif
-
-
 #define SWIGPYTHON
 #define SWIG_PYTHON_THREADS
 #define SWIG_PYTHON_DIRECTOR_NO_VTABLE
@@ -4289,7 +4282,7 @@ int X509_NAME_get0_der(X509_NAME *nm, const unsigned char **pder,
 
 #else /* PY2K */
 
-/* #define PyLong_FromLong(x) PyInt_FromLong(x) */
+#define PyLong_FromLong(x) PyInt_FromLong(x)
 #define PyUnicode_AsUTF8(x) PyString_AsString(x)
 
 #endif /* PY_MAJOR_VERSION */
@@ -4475,7 +4468,9 @@ m2_PyString_AsStringAndSizeInt(PyObject *obj, char **s, int *len)
     return 0;
 }
 
-#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, __func__)
+/* Yes, __FUNCTION__ is a non-standard symbol, but it is supported by
+ * both gcc and MSVC. */
+#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, (const char*) __FUNCTION__)
 
 static void m2_PyErr_Msg_Caller(PyObject *err_type, const char* caller) {
     const char *err_msg;
@@ -4599,13 +4594,14 @@ int x509_store_verify_callback(int ok, X509_STORE_CTX *ctx) {
     PyObject *_x509_store_ctx_swigptr=0, *_x509_store_ctx_obj=0, *_x509_store_ctx_inst=0, *_klass=0;
     int cret;
     PyObject *self = NULL; /* bug in SWIG_NewPointerObj as of 3.0.5 */
+    PyObject *x509mod;
 
 
     gilstate = PyGILState_Ensure();
 
     /* Below, handle only what is called 'new style callback' in ssl_verify_callback().
        TODO: does 'old style callback' exist any more? */
-    PyObject *x509mod = PyDict_GetItemString(PyImport_GetModuleDict(), "M2Crypto.X509");
+    x509mod = PyDict_GetItemString(PyImport_GetModuleDict(), "M2Crypto.X509");
     _klass = PyObject_GetAttrString(x509mod, "X509_Store_Context");
     _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
     _x509_store_ctx_obj = Py_BuildValue("(Oi)", _x509_store_ctx_swigptr, 0);
@@ -4997,6 +4993,7 @@ BIO * bio_new_file(const char *filename, const char *mode) {
 
 BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
     FILE *fp = NULL;
+    BIO *bio = NULL;
 #if PY_MAJOR_VERSION >= 3
     if (PyObject_HasAttrString(pyfile, "fileno")) {
         int fd = (int)PyLong_AsLong(PyObject_CallMethod(pyfile, "fileno", NULL));
@@ -5006,20 +5003,20 @@ BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
             fp = fdopen(fd, mode);
         }
         else {
-            PyErr_Format(PyExc_ValueError,
+            PyErr_Format(_bio_err,
                          "File doesn’t have mode attribute!");
             return NULL;
         }
     }
     else {
-        PyErr_Format(PyExc_ValueError, "File doesn’t have fileno method!");
+        PyErr_Format(_bio_err, "File doesn’t have fileno method!");
         return NULL;
     }
 
 #else
     fp = PyFile_AsFile(pyfile);
 #endif
-    BIO *bio = BIO_new_fp(fp, bio_close); /* returns NULL if error occurred */
+    bio = BIO_new_fp(fp, bio_close); /* returns NULL if error occurred */
 
     if (bio == NULL) {
         char *name = "";
@@ -5029,7 +5026,7 @@ BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
                     PyObject_CallMethod(pyfile, "name", NULL), NULL);
         }
         else {
-            PyErr_Format(PyExc_ValueError,
+            PyErr_Format(_bio_err,
                          "File doesn’t have name attribute!");
             return NULL;
         }
@@ -5288,7 +5285,7 @@ int bio_should_write(BIO* a) {
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 /* implment custom BIO_s_pyfd */
 
-#ifdef WIN32
+#ifdef _WIN32
 #  define clear_sys_error()       SetLastError(0)
 /* Linux doesn't use underscored calls yet */
 #  define open(p, f, m) _open(p, f, m)
@@ -5663,11 +5660,11 @@ PyObject *rand_bytes(int n) {
         PyMem_Free(blob);
         return obj;
     } else if (ret == 0) {
-        PyErr_SetString(PyExc_ValueError, "Not enough randomness.");
+        PyErr_SetString(_rand_err, "Not enough randomness.");
         PyMem_Free(blob);
         return NULL;
     } else if (ret == -1) {
-        PyErr_SetString(PyExc_ValueError,
+        PyErr_SetString(_rand_err,
                         "Not supported by the current RAND method.");
         PyMem_Free(blob);
         return NULL;
@@ -5726,13 +5723,13 @@ PyObject *rand_file_name(void) {
 }
 
 void rand_screen(void) {
-#ifdef __WINDOWS__
+#ifdef _WIN32
     RAND_screen();
 #endif
 }
 
 int rand_win32_event(unsigned int imsg, int wparam, long lparam) {
-#ifdef __WINDOWS__
+#ifdef _WIN32
     return RAND_event(imsg, wparam, lparam);
 #else
     return 0;
@@ -5795,9 +5792,10 @@ RSA *pkey_get1_rsa(EVP_PKEY *pkey) {
     RSA *ret = NULL;
 
     if ((ret = EVP_PKEY_get1_RSA(pkey)) == NULL) {
-        /* Yes, _evp_err would be better, but unfortunately
-           this is part of API. */
-        PyErr_Format(PyExc_ValueError, "Invalid key in function %s.", __func__);
+        /* _evp_err now inherits from PyExc_ValueError, so we should
+         * keep API intact.
+         */
+        PyErr_Format(_evp_err, "Invalid key in function %s.", __FUNCTION__);
     }
 
     return ret;
@@ -6170,7 +6168,7 @@ EVP_PKEY *pkey_new(void) {
 
     if ((ret = EVP_PKEY_new()) == NULL) {
         PyErr_Format(PyExc_MemoryError,
-                     "Insufficient memory for new key in function %s.", __func__);
+                     "Insufficient memory for new key in function %s.", __FUNCTION__);
     }
 
     return ret;
@@ -6187,7 +6185,7 @@ EVP_PKEY *pkey_read_pem(BIO *f, PyObject *pyfunc) {
 
     if (pk == NULL) {
         PyErr_Format(_evp_err,
-                     "Unable to read private key in function %s.", __func__);
+                     "Unable to read private key in function %s.", __FUNCTION__);
     }
 
     return pk;
@@ -6204,7 +6202,7 @@ EVP_PKEY *pkey_read_pem_pubkey(BIO *f, PyObject *pyfunc) {
 
     if (pk == NULL) {
         PyErr_Format(_evp_err,
-                     "Unable to read public key in function %s.", __func__);
+                     "Unable to read public key in function %s.", __FUNCTION__);
     }
 
     return pk;
@@ -6221,7 +6219,7 @@ PyObject *pkey_as_der(EVP_PKEY *pkey) {
     PyObject * der;
     len = i2d_PUBKEY(pkey, &pp);
     if (len < 0){
-        PyErr_SetString(PyExc_ValueError, "EVP_PKEY as DER failed");
+        PyErr_SetString(_evp_err, "EVP_PKEY as DER failed");
         return NULL;
     }
 
@@ -6298,7 +6296,7 @@ PyObject *pkey_get_modulus(EVP_PKEY *pkey)
             break;
 
         default:
-            PyErr_SetString(PyExc_ValueError, "unsupported key type");
+            PyErr_SetString(_evp_err, "unsupported key type");
             return NULL;
     }
 }
@@ -7439,7 +7437,12 @@ int dsa_type_check(DSA *dsa) {
 #include <openssl/ssl.h>
 #include <openssl/tls1.h>
 #include <openssl/x509.h>
-#ifndef _MSC_VER
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <Windows.h>
+#pragma comment(lib, "Ws2_32")
+typedef unsigned __int64 uint64_t;
+#else
 #include <poll.h>
 #include <sys/time.h>
 #endif
@@ -7483,7 +7486,7 @@ void ssl_ctx_passphrase_callback(SSL_CTX *ctx, PyObject *pyfunc) {
 
 int ssl_ctx_use_x509(SSL_CTX *ctx, X509 *x) {
     int i;
-    
+
     if (!(i = SSL_CTX_use_certificate(ctx, x))) {
         m2_PyErr_Msg(_ssl_err);
         return -1;
@@ -7494,7 +7497,7 @@ int ssl_ctx_use_x509(SSL_CTX *ctx, X509 *x) {
 
 int ssl_ctx_use_cert(SSL_CTX *ctx, char *file) {
     int i;
-    
+
     if (!(i = SSL_CTX_use_certificate_file(ctx, file, SSL_FILETYPE_PEM))) {
         m2_PyErr_Msg(_ssl_err);
         return -1;
@@ -7515,7 +7518,7 @@ int ssl_ctx_use_cert_chain(SSL_CTX *ctx, char *file) {
 
 int ssl_ctx_use_privkey(SSL_CTX *ctx, char *file) {
     int i;
-    
+
     if (!(i = SSL_CTX_use_PrivateKey_file(ctx, file, SSL_FILETYPE_PEM))) {
         m2_PyErr_Msg(_ssl_err);
         return -1;
@@ -7546,7 +7549,7 @@ int ssl_ctx_use_pkey_privkey(SSL_CTX *ctx, EVP_PKEY *pkey) {
 
 int ssl_ctx_check_privkey(SSL_CTX *ctx) {
     int ret;
-    
+
     if (!(ret = SSL_CTX_check_private_key(ctx))) {
         m2_PyErr_Msg(_ssl_err);
         return -1;
@@ -7661,7 +7664,7 @@ int ssl_set_session_id_context(SSL *ssl, PyObject *sid_ctx) {
 
 int ssl_set_fd(SSL *ssl, int fd) {
     int ret;
-    
+
     if (!(ret = SSL_set_fd(ssl, fd))) {
         m2_PyErr_Msg(_ssl_err);
         return -1;
@@ -7693,7 +7696,7 @@ static void ssl_handle_error(int ssl_err, int ret) {
      }
 }
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 /* http://stackoverflow.com/questions/10905892/equivalent-of-gettimeday-for-windows */
 int gettimeofday(struct timeval * tp, struct timezone * tzp)
 {
@@ -7717,7 +7720,11 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
 
 static int ssl_sleep_with_timeout(SSL *ssl, const struct timeval *start,
                                   double timeout, int ssl_err) {
-    struct pollfd fd;
+#ifdef _WIN32
+struct WSAPOLLFD fd;
+#else
+struct pollfd fd;
+#endif
     struct timeval tv;
     int ms, tmp;
 
@@ -7763,7 +7770,7 @@ static int ssl_sleep_with_timeout(SSL *ssl, const struct timeval *start,
         return -1;
     }
     Py_BEGIN_ALLOW_THREADS
-#ifdef _MSC_VER
+#ifdef _WIN32
     tmp = WSAPoll(&fd, 1, ms);
 #else
     tmp = poll(&fd, 1, ms);
@@ -7775,7 +7782,7 @@ static int ssl_sleep_with_timeout(SSL *ssl, const struct timeval *start,
     	case 0:
             goto timeout;
     	case -1:
-#ifdef _MSC_VER
+#ifdef _WIN32
             if (WSAGetLastError() == EINTR)
 #else
             if (errno == EINTR)
@@ -7941,13 +7948,13 @@ PyObject *ssl_read_nbio(SSL *ssl, int num) {
         PyErr_SetString(PyExc_MemoryError, "ssl_read");
         return NULL;
     }
-    
-    
+
+
     Py_BEGIN_ALLOW_THREADS
     r = SSL_read(ssl, buf, num);
     Py_END_ALLOW_THREADS
-    
-    
+
+
     switch (SSL_get_error(ssl, r)) {
         case SSL_ERROR_NONE:
         case SSL_ERROR_ZERO_RETURN:
@@ -7978,8 +7985,8 @@ PyObject *ssl_read_nbio(SSL *ssl, int num) {
             break;
     }
     PyMem_Free(buf);
-    
-    
+
+
     return obj;
 }
 
@@ -8024,7 +8031,7 @@ int ssl_write(SSL *ssl, PyObject *blob, double timeout) {
         default:
             ret = -1;
     }
-    
+
     m2_PyBuffer_Release(blob, &buf);
     return ret;
 }
@@ -8038,12 +8045,12 @@ int ssl_write_nbio(SSL *ssl, PyObject *blob) {
         return -1;
     }
 
-    
+
     Py_BEGIN_ALLOW_THREADS
     r = SSL_write(ssl, buf.buf, buf.len);
     Py_END_ALLOW_THREADS
-    
-    
+
+
     switch (SSL_get_error(ssl, r)) {
         case SSL_ERROR_NONE:
         case SSL_ERROR_ZERO_RETURN:
@@ -8068,7 +8075,7 @@ int ssl_write_nbio(SSL *ssl, PyObject *blob) {
         default:
             ret = -1;
     }
-    
+
     m2_PyBuffer_Release(blob, &buf);
     return ret;
 }
@@ -22651,7 +22658,7 @@ SWIGINTERN PyObject *_wrap_x509_name_entry_set_data(PyObject *self, PyObject *ar
       
       
       if (len > INT_MAX) {
-        PyErr_SetString(PyExc_ValueError, "object too large");
+        PyErr_SetString(_x509_err, "object too large");
         return NULL;
       }
       arg4 = len;
