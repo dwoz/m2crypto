@@ -75,6 +75,18 @@ OPENSSL_STACK *OPENSSL_sk_deep_copy(const OPENSSL_STACK *sk,
 }
 #endif /* OpenSSL 1.0.2 copmatbility shim */
 
+/* Windows helpers */
+#ifdef _WIN32
+int getCountProcHandles() {
+    /* https://stackoverflow.com/a/15371085/164233 */
+    PDWORD handles_count;
+
+    if (GetProcessHandleCount(GetCurrentProcess(), handles_count) != 0) {
+        return (int)*handles_count;
+    }
+    return NULL;
+}
+#endif
 
 /* Blob interface. Deprecated. */
 

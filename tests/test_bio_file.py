@@ -31,14 +31,13 @@ class FileTestCase(unittest.TestCase):
 
         self.fd_count = self.__mfd()
 
-    # TODO: this does not work on Windows. Provide and test
-    # a fallback method, like
-    #       os.fdopen().fileno()-1
-    # or use GetProcessHandleCount
-    # (https://stackoverflow.com/a/15371085/164233 and https://is.gd/n6v28O)
     def __mfd(self):
         if hasattr(self, '__dev_fd'):
             return len(os.listdir(self.__dev_fd))
+        elif platform.system() == 'Windows':
+            return m2.getCountProcHandles()
+        else:
+            return None
 
     def tearDown(self):
 
