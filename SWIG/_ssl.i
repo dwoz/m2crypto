@@ -8,6 +8,7 @@
 **
 */
 /* $Id$ */
+
 %{
 #include <pythread.h>
 #include <limits.h>
@@ -16,12 +17,7 @@
 #include <openssl/ssl.h>
 #include <openssl/tls1.h>
 #include <openssl/x509.h>
-#ifdef _WIN32
-#include <WinSock2.h>
-#include <Windows.h>
-#pragma comment(lib, "Ws2_32")
-typedef unsigned __int64 uint64_t;
-#else
+#ifndef _WIN32
 #include <poll.h>
 #include <sys/time.h>
 #endif
@@ -525,7 +521,7 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
 static int ssl_sleep_with_timeout(SSL *ssl, const struct timeval *start,
                                   double timeout, int ssl_err) {
 #ifdef _WIN32
-struct WSAPOLLFD fd;
+WSAPOLLFD fd;
 #else
 struct pollfd fd;
 #endif
