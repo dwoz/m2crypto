@@ -157,20 +157,20 @@ static int m2_PyObject_GetBufferInt(PyObject *obj, Py_buffer *view, int flags)
     int ret;
 
     if (PyObject_CheckBuffer(obj))
-	ret = PyObject_GetBuffer(obj, view, flags);
+        ret = PyObject_GetBuffer(obj, view, flags);
     else {
-	const void *buf;
+        const void *buf;
 
-	ret = PyObject_AsReadBuffer(obj, &buf, &view->len);
-	if (ret == 0)
-	    view->buf = (void *)buf;
+        ret = PyObject_AsReadBuffer(obj, &buf, &view->len);
+        if (ret == 0)
+            view->buf = (void *)buf;
     }
     if (ret)
-	return ret;
+        return ret;
     if (view->len > INT_MAX) {
-	PyErr_SetString(PyExc_ValueError, "object too large");
-	m2_PyBuffer_Release(obj, view);
-	return -1;
+        PyErr_SetString(PyExc_ValueError, "object too large");
+        m2_PyBuffer_Release(obj, view);
+        return -1;
     }
 
     return 0;
@@ -181,7 +181,7 @@ m2_PyObject_AsBIGNUM(PyObject* value, PyObject* _py_exc)
 {
     BIGNUM* bn;
     const void* vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -197,7 +197,7 @@ m2_PyObject_AsBIGNUM(PyObject* value, PyObject* _py_exc)
 static void m2_PyBuffer_Release(PyObject *obj, Py_buffer *view)
 {
     if (PyObject_CheckBuffer(obj))
-	PyBuffer_Release(view);
+        PyBuffer_Release(view);
     /* else do nothing, view->buf comes from PyObject_AsReadBuffer */
 }
 
@@ -219,9 +219,19 @@ m2_PyString_AsStringAndSizeInt(PyObject *obj, char **s, int *len)
     return 0;
 }
 
-/* Yes, __FUNCTION__ is a non-standard symbol, but it is supported by
- * both gcc and MSVC. */
-#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, (const char*) __FUNCTION__)
+/* Works as PyFile_Name, but always returns a new object. */
+PyObject *m2_PyFile_Name(PyObject *pyfile) {
+    PyObject *out = NULL;
+#if PY_MAJOR_VERSION >= 3
+   out = PyObject_GetAttrString(pyfile, "name");
+#else
+   out = PyFile_Name(pyfile);
+   Py_XINCREF(out);
+#endif
+    return out;
+}
+
+#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, __func__)
 
 static void m2_PyErr_Msg_Caller(PyObject *err_type, const char* caller) {
     const char *err_msg;
@@ -283,11 +293,7 @@ int ssl_verify_callback(int ok, X509_STORE_CTX *ctx) {
         _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
         _x509_store_ctx_obj = Py_BuildValue("(Oi)", _x509_store_ctx_swigptr, 0);
 
-#if PY_MAJOR_VERSION >= 3
-        _x509_store_ctx_inst = PyType_GenericNew(_klass, _x509_store_ctx_obj, NULL);
-#else
-        _x509_store_ctx_inst = PyInstance_New(_klass, _x509_store_ctx_obj, NULL);
-#endif // PY_MAJOR_VERSION >= 3
+        _x509_store_ctx_inst = PyObject_CallObject(_klass, _x509_store_ctx_obj);
 
         argv = Py_BuildValue("(iO)", ok, _x509_store_ctx_inst);
     } else {
@@ -357,11 +363,7 @@ int x509_store_verify_callback(int ok, X509_STORE_CTX *ctx) {
     _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
     _x509_store_ctx_obj = Py_BuildValue("(Oi)", _x509_store_ctx_swigptr, 0);
 
-#if PY_MAJOR_VERSION >= 3
-        _x509_store_ctx_inst = PyType_GenericNew(_klass, _x509_store_ctx_obj, NULL);
-#else
-        _x509_store_ctx_inst = PyInstance_New(_klass, _x509_store_ctx_obj, NULL);
-#endif // PY_MAJOR_VERSION >= 3
+    _x509_store_ctx_inst = PyObject_CallObject(_klass, _x509_store_ctx_obj);
 
     argv = Py_BuildValue("(iO)", ok, _x509_store_ctx_inst);
 
@@ -517,7 +519,7 @@ void lib_init() {
 warrant a separate file. */
 
 PyObject *bn_to_mpi(const BIGNUM *bn) {
-    int len;
+    int len = 0;
     unsigned char *mpi;
     PyObject *pyo;
 
@@ -536,7 +538,7 @@ PyObject *bn_to_mpi(const BIGNUM *bn) {
 
 const BIGNUM *mpi_to_bn(PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -545,7 +547,7 @@ const BIGNUM *mpi_to_bn(PyObject *value) {
 }
 
 PyObject *bn_to_bin(BIGNUM *bn) {
-    int len;
+    int len = 0;
     unsigned char *bin;
     PyObject *pyo;
 
@@ -564,7 +566,7 @@ PyObject *bn_to_bin(BIGNUM *bn) {
 
 const BIGNUM *bin_to_bn(PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -575,7 +577,7 @@ const BIGNUM *bin_to_bn(PyObject *value) {
 PyObject *bn_to_hex(BIGNUM *bn) {
     char *hex;
     PyObject *pyo;
-    Py_ssize_t len;
+    Py_ssize_t len = 0;
 
     hex = BN_bn2hex(bn);
     if (!hex) {
@@ -593,7 +595,7 @@ PyObject *bn_to_hex(BIGNUM *bn) {
 
 BIGNUM *hex_to_bn(PyObject *value) {
     const void *vbuf;
-    Py_ssize_t vlen;
+    Py_ssize_t vlen = 0;
     BIGNUM *bn;
 
     if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
@@ -613,7 +615,7 @@ BIGNUM *hex_to_bn(PyObject *value) {
 
 BIGNUM *dec_to_bn(PyObject *value) {
     const void *vbuf;
-    Py_ssize_t vlen;
+    Py_ssize_t vlen = 0;
     BIGNUM *bn;
 
     if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
@@ -636,7 +638,7 @@ BIGNUM *dec_to_bn(PyObject *value) {
 /* Various useful typemaps. */
 
 %typemap(in) Blob * {
-    Py_ssize_t len;
+    Py_ssize_t len = 0;
 
     if (!PyBytes_Check($input)) {
         PyErr_SetString(PyExc_TypeError, "expected PyString");

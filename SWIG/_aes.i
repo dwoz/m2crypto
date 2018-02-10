@@ -41,34 +41,34 @@ void AES_free(AES_KEY *key) {
 }
 
 /* 
-// op == 0: decrypt
-// otherwise: encrypt (Python code will supply the value 1.)
+// op == 0: encrypt
+// otherwise: decrypt (Python code will supply the value 1.)
 */
 PyObject *AES_set_key(AES_KEY *key, PyObject *value, int bits, int op) { 
-    const void *vbuf; 
+    char *vbuf; 
     Py_ssize_t vlen;
 
-    if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
+    if (PyBytes_AsStringAndSize(value, &vbuf, &vlen) == -1)
         return NULL;
 
     if (op == 0) 
-        AES_set_encrypt_key(vbuf, bits, key);
+        AES_set_encrypt_key((const unsigned char *)vbuf, bits, key);
     else
-        AES_set_decrypt_key(vbuf, bits, key);
+        AES_set_decrypt_key((const unsigned char *)vbuf, bits, key);
     Py_RETURN_NONE;
 }
 
 /* 
-// op == 0: decrypt
-// otherwise: encrypt (Python code will supply the value 1.)
+// op == 0: encrypt
+// otherwise: decrypt (Python code will supply the value 1.)
 */
 PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
-    const void *buf;
+    char *buf;
     Py_ssize_t len;
     unsigned char *out;
     PyObject *res;
 
-    if (PyObject_AsReadBuffer(in, &buf, &len) == -1)
+    if (PyBytes_AsStringAndSize(in, &buf, &len) == -1)
         return NULL;
 
     if (!(out=(unsigned char *)PyMem_Malloc(outlen))) {
@@ -76,10 +76,10 @@ PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
         return NULL;
     }
     if (op == 0)
-        AES_encrypt((const unsigned char *)in, out, key);
+        AES_encrypt((const unsigned char *)buf, out, key);
     else
-        AES_decrypt((const unsigned char *)in, out, key);
-    return PyBytes_FromStringAndSize((char*)out, outlen);
+        AES_decrypt((const unsigned char *)buf, out, key);
+    res = PyBytes_FromStringAndSize((char*)out, outlen);
     PyMem_Free(out);
     return res;
 }

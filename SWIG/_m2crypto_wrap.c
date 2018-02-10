@@ -4279,6 +4279,36 @@ int X509_NAME_get0_der(X509_NAME *nm, const unsigned char **pder,
 
 #if PY_MAJOR_VERSION >= 3
 
+FILE* PyFile_AsFile(PyObject *pyfile) {
+    FILE* fp;
+    int fd;
+    const char *mode_str = NULL;
+    PyObject *mode_obj;
+
+    if ((fd = PyObject_AsFileDescriptor(pyfile)) == -1) {
+        PyErr_SetString(PyExc_BlockingIOError,
+                        "Cannot find file handler for the Python file!");
+        return NULL;
+    }
+
+    if ((mode_obj = PyObject_GetAttrString(pyfile, "mode")) == NULL) {
+        mode_str = "rb";
+        PyErr_Clear();
+    }
+    else {
+        /* convert to plain string
+         * note that error checking is embedded in the function
+         */
+        mode_str = PyUnicode_AsUTF8AndSize(mode_obj, NULL);
+    }
+
+    if((fp = fdopen(fd, mode_str)) == NULL) {
+         PyErr_SetFromErrno(PyExc_IOError);
+    }
+
+    Py_XDECREF(mode_obj);
+    return fp;
+}
 
 #else /* PY2K */
 
@@ -4406,20 +4436,20 @@ static int m2_PyObject_GetBufferInt(PyObject *obj, Py_buffer *view, int flags)
     int ret;
 
     if (PyObject_CheckBuffer(obj))
-	ret = PyObject_GetBuffer(obj, view, flags);
+        ret = PyObject_GetBuffer(obj, view, flags);
     else {
-	const void *buf;
+        const void *buf;
 
-	ret = PyObject_AsReadBuffer(obj, &buf, &view->len);
-	if (ret == 0)
-	    view->buf = (void *)buf;
+        ret = PyObject_AsReadBuffer(obj, &buf, &view->len);
+        if (ret == 0)
+            view->buf = (void *)buf;
     }
     if (ret)
-	return ret;
+        return ret;
     if (view->len > INT_MAX) {
-	PyErr_SetString(PyExc_ValueError, "object too large");
-	m2_PyBuffer_Release(obj, view);
-	return -1;
+        PyErr_SetString(PyExc_ValueError, "object too large");
+        m2_PyBuffer_Release(obj, view);
+        return -1;
     }
 
     return 0;
@@ -4430,7 +4460,7 @@ m2_PyObject_AsBIGNUM(PyObject* value, PyObject* _py_exc)
 {
     BIGNUM* bn;
     const void* vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -4446,7 +4476,7 @@ m2_PyObject_AsBIGNUM(PyObject* value, PyObject* _py_exc)
 static void m2_PyBuffer_Release(PyObject *obj, Py_buffer *view)
 {
     if (PyObject_CheckBuffer(obj))
-	PyBuffer_Release(view);
+        PyBuffer_Release(view);
     /* else do nothing, view->buf comes from PyObject_AsReadBuffer */
 }
 
@@ -4468,9 +4498,19 @@ m2_PyString_AsStringAndSizeInt(PyObject *obj, char **s, int *len)
     return 0;
 }
 
-/* Yes, __FUNCTION__ is a non-standard symbol, but it is supported by
- * both gcc and MSVC. */
-#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, (const char*) __FUNCTION__)
+/* Works as PyFile_Name, but always returns a new object. */
+PyObject *m2_PyFile_Name(PyObject *pyfile) {
+    PyObject *out = NULL;
+#if PY_MAJOR_VERSION >= 3
+   out = PyObject_GetAttrString(pyfile, "name");
+#else
+   out = PyFile_Name(pyfile);
+   Py_XINCREF(out);
+#endif
+    return out;
+}
+
+#define m2_PyErr_Msg(type) m2_PyErr_Msg_Caller(type, __func__)
 
 static void m2_PyErr_Msg_Caller(PyObject *err_type, const char* caller) {
     const char *err_msg;
@@ -4532,11 +4572,7 @@ int ssl_verify_callback(int ok, X509_STORE_CTX *ctx) {
         _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
         _x509_store_ctx_obj = Py_BuildValue("(Oi)", _x509_store_ctx_swigptr, 0);
 
-#if PY_MAJOR_VERSION >= 3
-        _x509_store_ctx_inst = PyType_GenericNew(_klass, _x509_store_ctx_obj, NULL);
-#else
-        _x509_store_ctx_inst = PyInstance_New(_klass, _x509_store_ctx_obj, NULL);
-#endif // PY_MAJOR_VERSION >= 3
+        _x509_store_ctx_inst = PyObject_CallObject(_klass, _x509_store_ctx_obj);
 
         argv = Py_BuildValue("(iO)", ok, _x509_store_ctx_inst);
     } else {
@@ -4606,11 +4642,7 @@ int x509_store_verify_callback(int ok, X509_STORE_CTX *ctx) {
     _x509_store_ctx_swigptr = SWIG_NewPointerObj((void *)ctx, SWIGTYPE_p_X509_STORE_CTX, 0);
     _x509_store_ctx_obj = Py_BuildValue("(Oi)", _x509_store_ctx_swigptr, 0);
 
-#if PY_MAJOR_VERSION >= 3
-        _x509_store_ctx_inst = PyType_GenericNew(_klass, _x509_store_ctx_obj, NULL);
-#else
-        _x509_store_ctx_inst = PyInstance_New(_klass, _x509_store_ctx_obj, NULL);
-#endif // PY_MAJOR_VERSION >= 3
+    _x509_store_ctx_inst = PyObject_CallObject(_klass, _x509_store_ctx_obj);
 
     argv = Py_BuildValue("(iO)", ok, _x509_store_ctx_inst);
 
@@ -4765,7 +4797,7 @@ void lib_init() {
 warrant a separate file. */
 
 PyObject *bn_to_mpi(const BIGNUM *bn) {
-    int len;
+    int len = 0;
     unsigned char *mpi;
     PyObject *pyo;
 
@@ -4784,7 +4816,7 @@ PyObject *bn_to_mpi(const BIGNUM *bn) {
 
 const BIGNUM *mpi_to_bn(PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -4793,7 +4825,7 @@ const BIGNUM *mpi_to_bn(PyObject *value) {
 }
 
 PyObject *bn_to_bin(BIGNUM *bn) {
-    int len;
+    int len = 0;
     unsigned char *bin;
     PyObject *pyo;
 
@@ -4812,7 +4844,7 @@ PyObject *bn_to_bin(BIGNUM *bn) {
 
 const BIGNUM *bin_to_bn(PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -4823,7 +4855,7 @@ const BIGNUM *bin_to_bn(PyObject *value) {
 PyObject *bn_to_hex(BIGNUM *bn) {
     char *hex;
     PyObject *pyo;
-    Py_ssize_t len;
+    Py_ssize_t len = 0;
 
     hex = BN_bn2hex(bn);
     if (!hex) {
@@ -4841,7 +4873,7 @@ PyObject *bn_to_hex(BIGNUM *bn) {
 
 BIGNUM *hex_to_bn(PyObject *value) {
     const void *vbuf;
-    Py_ssize_t vlen;
+    Py_ssize_t vlen = 0;
     BIGNUM *bn;
 
     if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
@@ -4861,7 +4893,7 @@ BIGNUM *hex_to_bn(PyObject *value) {
 
 BIGNUM *dec_to_bn(PyObject *value) {
     const void *vbuf;
-    Py_ssize_t vlen;
+    Py_ssize_t vlen = 0;
     BIGNUM *bn;
 
     if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
@@ -4993,49 +5025,27 @@ BIO * bio_new_file(const char *filename, const char *mode) {
 
 BIO *bio_new_pyfile(PyObject *pyfile, int bio_close) {
     FILE *fp = NULL;
-    BIO *bio = NULL;
-#if PY_MAJOR_VERSION >= 3
-    if (PyObject_HasAttrString(pyfile, "fileno")) {
-        int fd = (int)PyLong_AsLong(PyObject_CallMethod(pyfile, "fileno", NULL));
-        if (PyObject_HasAttrString(pyfile, "mode")) {
-            char *mode = PyUnicode_AsUTF8AndSize(
-                    PyObject_CallMethod(pyfile, "mode", NULL), NULL);
-            fp = fdopen(fd, mode);
-        }
-        else {
-            PyErr_Format(_bio_err,
-                         "File doesn’t have mode attribute!");
-            return NULL;
-        }
-    }
-    else {
-        PyErr_Format(_bio_err, "File doesn’t have fileno method!");
-        return NULL;
-    }
 
-#else
     fp = PyFile_AsFile(pyfile);
-#endif
-    bio = BIO_new_fp(fp, bio_close); /* returns NULL if error occurred */
 
+    BIO *bio = BIO_new_fp(fp, bio_close);
+
+    /* returns NULL if error occurred */
     if (bio == NULL) {
-        char *name = "";
-#if PY_MAJOR_VERSION >= 3
-        if (PyObject_HasAttrString(pyfile, "name")) {
-            char *name = PyUnicode_AsUTF8AndSize(
-                    PyObject_CallMethod(pyfile, "name", NULL), NULL);
+        /* Find out the name of the file so we can have good error
+         * message. */
+        PyObject *pyname = m2_PyFile_Name(pyfile);
+        char *name = PyBytes_AsString(pyname);
+
+        if (name == NULL) {
+            PyErr_Format(_bio_err,
+                         "Opening of the new BIO on file failed!");
         }
         else {
             PyErr_Format(_bio_err,
-                         "File doesn’t have name attribute!");
-            return NULL;
+                         "Opening of the new BIO on file %s failed!", name);
         }
-#else
-        name = PyString_AsString(PyFile_Name(pyfile));
-#endif
-        PyErr_Format(PyExc_MemoryError,
-                     "Opening of the new BIO on file %s failed!", name);
-        return NULL;
+        Py_DECREF(pyname);
     }
     return bio;
 }
@@ -5096,7 +5106,7 @@ PyObject *bio_gets(BIO *bio, int num) {
 
 int bio_write(BIO *bio, PyObject *from) {
     const void *fbuf;
-    int flen, ret;
+    int flen = 0, ret;
 
     if (m2_PyObject_AsReadBufferInt(from, &fbuf, &flen) == -1)
         return -1;
@@ -5543,7 +5553,8 @@ PyObject *bn_rand_range(PyObject *range)
     BIGNUM *rng = NULL;
     PyObject *ret, *tuple;
     PyObject *format, *rangePyString;
-    char *randhex, *rangehex;
+    char *randhex; /* PyLong_FromString is unhappy with const */
+    const char *rangehex;
 
     /* Wow, it's a lot of work to convert into a hex string in C! */
     format = PyUnicode_FromString("%x");
@@ -5572,11 +5583,7 @@ PyObject *bn_rand_range(PyObject *range)
     Py_DECREF(format);
     Py_DECREF(tuple);
 
-#if PY_MAJOR_VERSION >= 3
-    rangehex = PyUnicode_AsUTF8(rangePyString);
-#else
-    rangehex = PyString_AsString(rangePyString);
-#endif // PY_MAJOR_VERSION >= 3
+    rangehex = (const char*)PyUnicode_AsUTF8(rangePyString);
 
     if (!BN_hex2bn(&rng, rangehex)) {
         /*Custom errors?*/
@@ -5627,7 +5634,7 @@ void rand_init(PyObject *rand_err) {
 
 PyObject *rand_seed(PyObject *seed) {
     const void *buf;
-    int len;
+    int len = 0;
 
     m2_PyObject_AsReadBufferInt(seed, &buf, &len);
 
@@ -5637,7 +5644,7 @@ PyObject *rand_seed(PyObject *seed) {
 
 PyObject *rand_add(PyObject *blob, double entropy) {
     const void *buf;
-    int len;
+    int len = 0;
 
     m2_PyObject_AsReadBufferInt(blob, &buf, &len);
 
@@ -5795,7 +5802,7 @@ RSA *pkey_get1_rsa(EVP_PKEY *pkey) {
         /* _evp_err now inherits from PyExc_ValueError, so we should
          * keep API intact.
          */
-        PyErr_Format(_evp_err, "Invalid key in function %s.", __FUNCTION__);
+        PyErr_Format(_evp_err, "Invalid key in function %s.", __func__);
     }
 
     return ret;
@@ -5810,7 +5817,7 @@ PyObject *pkcs5_pbkdf2_hmac_sha1(PyObject *pass,
     unsigned char *saltbuf;
     char *passbuf;
     PyObject *ret;
-    int passlen, saltlen;
+    int passlen = 0, saltlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(pass, (const void **)&passbuf,
                                     &passlen) == -1)
@@ -5891,7 +5898,7 @@ void hmac_ctx_free(HMAC_CTX *ctx) {
 
 PyObject *hmac_init(HMAC_CTX *ctx, PyObject *key, const EVP_MD *md) {
     const void *kbuf;
-    int klen;
+    int klen = 0;
 
     if (m2_PyObject_AsReadBufferInt(key, &kbuf, &klen) == -1)
         return NULL;
@@ -5941,7 +5948,7 @@ PyObject *hmac_final(HMAC_CTX *ctx) {
 PyObject *hmac(PyObject *key, PyObject *data, const EVP_MD *md) {
     const void *kbuf, *dbuf;
     void *blob;
-    int klen;
+    int klen = 0;
     unsigned int blen;
     Py_ssize_t dlen;
     PyObject *ret;
@@ -5984,7 +5991,7 @@ PyObject *bytes_to_key(const EVP_CIPHER *cipher, EVP_MD *md,
                         int iter) {
     unsigned char key[EVP_MAX_KEY_LENGTH];
     const void *dbuf, *sbuf;
-    int dlen, klen;
+    int dlen = 0, klen;
     Py_ssize_t slen;
     PyObject *ret;
 
@@ -6021,7 +6028,7 @@ PyObject *cipher_init(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
 
 PyObject *cipher_update(EVP_CIPHER_CTX *ctx, PyObject *blob) {
     const void *buf;
-    int len, olen;
+    int len = 0, olen;
     void *obuf;
     PyObject *ret;
 
@@ -6117,7 +6124,7 @@ int verify_update(EVP_MD_CTX *ctx, PyObject *blob) {
 
 int verify_final(EVP_MD_CTX *ctx, PyObject *blob, EVP_PKEY *pkey) {
     unsigned char *kbuf;
-    int len;
+    int len = 0;
 
     if (m2_PyObject_AsReadBufferInt(blob, (const void **)&kbuf, &len) == -1)
         return -1;
@@ -6337,34 +6344,34 @@ void AES_free(AES_KEY *key) {
 }
 
 /* 
-// op == 0: decrypt
-// otherwise: encrypt (Python code will supply the value 1.)
+// op == 0: encrypt
+// otherwise: decrypt (Python code will supply the value 1.)
 */
 PyObject *AES_set_key(AES_KEY *key, PyObject *value, int bits, int op) { 
-    const void *vbuf; 
+    char *vbuf; 
     Py_ssize_t vlen;
 
-    if (PyObject_AsReadBuffer(value, &vbuf, &vlen) == -1)
+    if (PyBytes_AsStringAndSize(value, &vbuf, &vlen) == -1)
         return NULL;
 
     if (op == 0) 
-        AES_set_encrypt_key(vbuf, bits, key);
+        AES_set_encrypt_key((const unsigned char *)vbuf, bits, key);
     else
-        AES_set_decrypt_key(vbuf, bits, key);
+        AES_set_decrypt_key((const unsigned char *)vbuf, bits, key);
     Py_RETURN_NONE;
 }
 
 /* 
-// op == 0: decrypt
-// otherwise: encrypt (Python code will supply the value 1.)
+// op == 0: encrypt
+// otherwise: decrypt (Python code will supply the value 1.)
 */
 PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
-    const void *buf;
+    char *buf;
     Py_ssize_t len;
     unsigned char *out;
     PyObject *res;
 
-    if (PyObject_AsReadBuffer(in, &buf, &len) == -1)
+    if (PyBytes_AsStringAndSize(in, &buf, &len) == -1)
         return NULL;
 
     if (!(out=(unsigned char *)PyMem_Malloc(outlen))) {
@@ -6372,10 +6379,10 @@ PyObject *AES_crypt(const AES_KEY *key, PyObject *in, int outlen, int op) {
         return NULL;
     }
     if (op == 0)
-        AES_encrypt((const unsigned char *)in, out, key);
+        AES_encrypt((const unsigned char *)buf, out, key);
     else
-        AES_decrypt((const unsigned char *)in, out, key);
-    return PyBytes_FromStringAndSize((char*)out, outlen);
+        AES_decrypt((const unsigned char *)buf, out, key);
+    res = PyBytes_FromStringAndSize((char*)out, outlen);
     PyMem_Free(out);
     return res;
 }
@@ -6402,7 +6409,7 @@ void rc4_free(RC4_KEY *key) {
 
 PyObject *rc4_set_key(RC4_KEY *key, PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -6502,7 +6509,7 @@ int dh_check(DH *dh) {
 
 PyObject *dh_compute_key(DH *dh, PyObject *pubkey) {
     const void *pkbuf;
-    int pklen, klen;
+    int pklen = 0, klen;
     void *key;
     BIGNUM *pk;
     PyObject *ret;
@@ -6742,7 +6749,7 @@ PyObject *rsa_set_en(RSA *rsa, PyObject *eval, PyObject* nval) {
 static BIGNUM* PyObject_Bin_AsBIGNUM(PyObject* value) {
     BIGNUM* bn;
     const void* vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -6775,7 +6782,7 @@ PyObject *rsa_set_en_bin(RSA *rsa, PyObject *eval, PyObject* nval) {
 PyObject *rsa_private_encrypt(RSA *rsa, PyObject *from, int padding) {
     const void *fbuf;
     void *tbuf;
-    int flen, tlen;
+    int flen = 0, tlen;
     PyObject *ret;
 
     if (m2_PyObject_AsReadBufferInt(from, &fbuf, &flen) == -1)
@@ -6802,7 +6809,7 @@ PyObject *rsa_private_encrypt(RSA *rsa, PyObject *from, int padding) {
 PyObject *rsa_public_decrypt(RSA *rsa, PyObject *from, int padding) {
     const void *fbuf;
     void *tbuf;
-    int flen, tlen;
+    int flen = 0, tlen = 0;
     PyObject *ret;
 
     if (m2_PyObject_AsReadBufferInt(from, &fbuf, &flen) == -1)
@@ -6832,7 +6839,7 @@ PyObject *rsa_public_decrypt(RSA *rsa, PyObject *from, int padding) {
 PyObject *rsa_public_encrypt(RSA *rsa, PyObject *from, int padding) {
     const void *fbuf;
     void *tbuf;
-    int flen, tlen;
+    int flen = 0, tlen;
     PyObject *ret;
 
     if (m2_PyObject_AsReadBufferInt(from, &fbuf, &flen) == -1)
@@ -6859,7 +6866,7 @@ PyObject *rsa_public_encrypt(RSA *rsa, PyObject *from, int padding) {
 PyObject *rsa_private_decrypt(RSA *rsa, PyObject *from, int padding) {
     const void *fbuf;
     void *tbuf;
-    int flen, tlen;
+    int flen = 0, tlen;
     PyObject *ret;
 
     if (m2_PyObject_AsReadBufferInt(from, &fbuf, &flen) == -1)
@@ -7247,7 +7254,7 @@ PyObject *dsa_set_pqg(DSA *dsa, PyObject *pval, PyObject* qval, PyObject* gval) 
 PyObject *dsa_set_pub(DSA *dsa, PyObject *value) {
     BIGNUM *bn;
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
 
     if (m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         return NULL;
@@ -7302,7 +7309,7 @@ int dsa_write_pub_key_bio(DSA* dsa, BIO* f) {
 
 PyObject *dsa_sign(DSA *dsa, PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
     PyObject *tuple;
     DSA_SIG *sig;
 
@@ -7326,7 +7333,7 @@ PyObject *dsa_sign(DSA *dsa, PyObject *value) {
 
 int dsa_verify(DSA *dsa, PyObject *value, PyObject *r, PyObject *s) {
     const void *vbuf, *rbuf, *sbuf;
-    int vlen, rlen, slen;
+    int vlen = 0, rlen = 0, slen = 0;
     DSA_SIG *sig;
     BIGNUM* pr, *ps;
     int ret;
@@ -7368,7 +7375,7 @@ int dsa_verify(DSA *dsa, PyObject *value, PyObject *r, PyObject *s) {
 
 PyObject *dsa_sign_asn1(DSA *dsa, PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
     void *sigbuf;
     unsigned int siglen;
     PyObject *ret;
@@ -7395,7 +7402,7 @@ PyObject *dsa_sign_asn1(DSA *dsa, PyObject *value) {
 int dsa_verify_asn1(DSA *dsa, PyObject *value, PyObject *sig) {
     const void *vbuf;
     void *sbuf;
-    int vlen, slen, ret;
+    int vlen = 0, slen = 0, ret = 0;
 
     if ((m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         || (m2_PyObject_AsReadBufferInt(sig, (const void **)&sbuf, &slen)
@@ -7574,7 +7581,7 @@ void ssl_ctx_set_verify(SSL_CTX *ctx, int mode, PyObject *pyfunc) {
 
 int ssl_ctx_set_session_id_context(SSL_CTX *ctx, PyObject *sid_ctx) {
     const void *buf;
-    int len;
+    int len = 0;
 
     if (m2_PyObject_AsReadBufferInt(sid_ctx, &buf, &len) == -1)
         return -1;
@@ -7654,7 +7661,7 @@ void ssl_set_client_CA_list_from_context(SSL *ssl, SSL_CTX *ctx) {
 
 int ssl_set_session_id_context(SSL *ssl, PyObject *sid_ctx) {
     const void *buf;
-    int len;
+    int len = 0;
 
     if (m2_PyObject_AsReadBufferInt(sid_ctx, &buf, &len) == -1)
         return -1;
@@ -8541,6 +8548,10 @@ int asn1_integer_set(ASN1_INTEGER *asn1, PyObject *value) {
     BIGNUM *bn = NULL;
     PyObject *fmt, *args, *hex;
 
+/* Despite all hopes to the contrary, we cannot survive here with
+ * PyLong_AsLong shims as provided in
+ * /usr/include/python2.7/longobject.h.
+ */
 #if PY_MAJOR_VERSION >= 3
     if (PyLong_Check(value))
         return ASN1_INTEGER_set(asn1, PyLong_AsLong(value));
@@ -9068,7 +9079,7 @@ PyObject *ecdsa_sig_get_s(ECDSA_SIG *ecdsa_sig) {
 
 PyObject *ecdsa_sign(EC_KEY *key, PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
     PyObject *tuple;
     ECDSA_SIG *sig;
 
@@ -9092,7 +9103,7 @@ PyObject *ecdsa_sign(EC_KEY *key, PyObject *value) {
 
 int ecdsa_verify(EC_KEY *key, PyObject *value, PyObject *r, PyObject *s) {
     const void *vbuf, *rbuf, *sbuf;
-    int vlen, rlen, slen;
+    int vlen = 0, rlen = 0, slen = 0;
     ECDSA_SIG *sig;
     int ret;
     BIGNUM* pr, *ps;
@@ -9135,7 +9146,7 @@ int ecdsa_verify(EC_KEY *key, PyObject *value, PyObject *r, PyObject *s) {
 
 PyObject *ecdsa_sign_asn1(EC_KEY *key, PyObject *value) {
     const void *vbuf;
-    int vlen;
+    int vlen = 0;
     void *sigbuf;
     unsigned int siglen;
     PyObject *ret;
@@ -9162,7 +9173,7 @@ PyObject *ecdsa_sign_asn1(EC_KEY *key, PyObject *value) {
 int ecdsa_verify_asn1(EC_KEY *key, PyObject *value, PyObject *sig) {
     const void *vbuf;
     void *sbuf;
-    int vlen, slen, ret;
+    int vlen = 0, slen = 0, ret;
 
     if ((m2_PyObject_AsReadBufferInt(value, &vbuf, &vlen) == -1)
         || (m2_PyObject_AsReadBufferInt(sig, (const void **)&sbuf, &slen)
@@ -10965,6 +10976,36 @@ SWIGINTERN PyObject *_wrap_bio_pop(PyObject *self, PyObject *args) {
   }
   result = (BIO *)BIO_pop(arg1);
   resultobj = SWIG_NewPointerObj(SWIG_as_voidptr(result), SWIGTYPE_p_BIO, 0 |  0 );
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_bio_eof(PyObject *self, PyObject *args) {
+  PyObject *resultobj = 0;
+  BIO *arg1 = (BIO *) 0 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  PyObject * obj0 = 0 ;
+  int result;
+  
+  if(!PyArg_UnpackTuple(args,(char *)"bio_eof",1,1,&obj0)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(obj0, &argp1,SWIGTYPE_p_BIO, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "bio_eof" "', argument " "1"" of type '" "BIO *""'"); 
+  }
+  arg1 = (BIO *)(argp1);
+  {
+    if (!arg1) {
+      SWIG_exception(SWIG_ValueError,"Received a NULL pointer.");
+    }
+  }
+  result = (int)BIO_eof(arg1);
+  {
+    resultobj=PyLong_FromLong(result);
+    if (PyErr_Occurred()) SWIG_fail;
+  }
   return resultobj;
 fail:
   return NULL;
@@ -29018,6 +29059,7 @@ static PyMethodDef SwigMethods[] = {
 	 { (char *)"bio_dup_chain", _wrap_bio_dup_chain, METH_VARARGS, NULL},
 	 { (char *)"bio_push", _wrap_bio_push, METH_VARARGS, NULL},
 	 { (char *)"bio_pop", _wrap_bio_pop, METH_VARARGS, NULL},
+	 { (char *)"bio_eof", _wrap_bio_eof, METH_VARARGS, NULL},
 	 { (char *)"bio_init", _wrap_bio_init, METH_VARARGS, NULL},
 	 { (char *)"bio_free", _wrap_bio_free, METH_VARARGS, NULL},
 	 { (char *)"bio_new_file", _wrap_bio_new_file, METH_VARARGS, NULL},

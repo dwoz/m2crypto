@@ -20,6 +20,7 @@ def suite():
         return mod
 
     modules_to_test = [
+        'tests.test_aes',
         'tests.test_asn1',
         'tests.test_bio',
         'tests.test_bio_membuf',
@@ -52,7 +53,8 @@ def suite():
     for module in map(my_import, modules_to_test):
         alltests.addTest(module.suite())
 
-    print('Version of OpenSSL is {0:x}'.format(m2.OPENSSL_VERSION_NUMBER))
+    print('Version of OpenSSL is {0:x} ({1:s})'.format(m2.OPENSSL_VERSION_NUMBER,
+            m2.OPENSSL_VERSION_TEXT))
 
     return alltests
 

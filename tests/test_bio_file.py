@@ -18,6 +18,7 @@ from M2Crypto.BIO import File, openfile
 log = logging.getLogger(__name__)
 
 
+
 class FileTestCase(unittest.TestCase):
 
     def setUp(self):
@@ -31,13 +32,14 @@ class FileTestCase(unittest.TestCase):
 
         self.fd_count = self.__mfd()
 
+    # TODO: this does not work on Windows. Provide and test
+    # a fallback method, like
+    #       os.fdopen().fileno()-1
+    # or use GetProcessHandleCount
+    # (https://stackoverflow.com/a/15371085/164233 and https://is.gd/n6v28O)
     def __mfd(self):
         if hasattr(self, '__dev_fd'):
             return len(os.listdir(self.__dev_fd))
-        elif platform.system() == 'Windows':
-            return m2.getCountProcHandles()
-        else:
-            return None
 
     def tearDown(self):
 
@@ -97,10 +99,10 @@ class FileTestCase(unittest.TestCase):
             f.write('hello\nworld\n')
         with openfile(self.fname, 'r') as f:
             self.assertTrue(f.readable())
-            self.assertEqual(f.readline(), 'hello\n')
-            self.assertEqual(f.readline(), 'world\n')
+            self.assertEqual(f.readline(), b'hello\n')
+            self.assertEqual(f.readline(), b'world\n')
         with openfile(self.fname, 'r') as f:
-            self.assertEqual(f.readlines(), ['hello\n', 'world\n'])
+            self.assertEqual(f.readlines(), [b'hello\n', b'world\n'])
 
     def test_tell_seek(self):
         with open(self.fname, 'w') as f:
